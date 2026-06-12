@@ -1,0 +1,256 @@
+project:
+  title: "AI在肝病中的应用：国内外现状及趋势"
+  description: "Chinese narrative background review for a hospital collaboration project."
+
+paths:
+  search_results: "search/pubmed_results.csv"
+  ai_screened: "screening/ai_screened.csv"
+  borderline_review: "screening/borderline_review.csv"
+  final_screened: "screening/final_screened.csv"
+  core_screened: "screening/core_screened.csv"
+  abstracts_dir: "search/abstracts"
+  pdf_dir: "pdfs"
+  pdf_map: "pdfs/pdf_map.csv"
+  extractions_dir: "extractions"
+  nbib: "search/included_papers.nbib"
+
+pubmed:
+  retmax_per_query: 180
+  date_filter: '("2019/01/01"[Date - Publication] : "2026/12/31"[Date - Publication])'
+  variables:
+    ai_terms: >-
+      ("artificial intelligence"[Title/Abstract] OR "machine learning"[Title/Abstract]
+      OR "deep learning"[Title/Abstract] OR "large language model"[Title/Abstract]
+      OR "large language models"[Title/Abstract] OR "natural language processing"[Title/Abstract]
+      OR radiomics[Title/Abstract] OR "neural network"[Title/Abstract])
+  queries:
+    - name: "general_hepatology_ai"
+      query: >-
+        {ai_terms} AND (hepatology[Title/Abstract] OR "liver disease"[Title/Abstract]
+        OR "liver diseases"[Title/Abstract]) AND {date_filter}
+    - name: "masld_mash_ai"
+      query: >-
+        {ai_terms} AND (MASLD[Title/Abstract] OR MASH[Title/Abstract] OR NAFLD[Title/Abstract]
+        OR "metabolic dysfunction-associated steatotic liver disease"[Title/Abstract]
+        OR "nonalcoholic fatty liver disease"[Title/Abstract]) AND {date_filter}
+    - name: "fibrosis_cirrhosis_ai"
+      query: >-
+        {ai_terms} AND ("liver fibrosis"[Title/Abstract] OR "hepatic fibrosis"[Title/Abstract]
+        OR cirrhosis[Title/Abstract] OR "liver stiffness"[Title/Abstract]) AND {date_filter}
+    - name: "viral_hepatitis_ai"
+      query: >-
+        {ai_terms} AND ("hepatitis B"[Title/Abstract] OR HBV[Title/Abstract]
+        OR "hepatitis C"[Title/Abstract] OR HCV[Title/Abstract]
+        OR "viral hepatitis"[Title/Abstract]) AND {date_filter}
+    - name: "hcc_liver_cancer_ai"
+      query: >-
+        {ai_terms} AND ("hepatocellular carcinoma"[Title/Abstract] OR HCC[Title/Abstract]
+        OR "liver cancer"[Title/Abstract] OR "liver neoplasm"[Title/Abstract])
+        AND {date_filter}
+    - name: "liver_transplant_ai"
+      query: >-
+        {ai_terms} AND ("liver transplantation"[Title/Abstract]
+        OR "liver transplant"[Title/Abstract] OR "graft survival"[Title/Abstract]
+        OR "graft injury"[Title/Abstract]) AND {date_filter}
+    - name: "clinical_workflow_llm"
+      query: >-
+        ("large language model"[Title/Abstract] OR "large language models"[Title/Abstract]
+        OR "natural language processing"[Title/Abstract] OR ChatGPT[Title/Abstract]
+        OR "retrieval augmented generation"[Title/Abstract])
+        AND (hepatology[Title/Abstract] OR liver[Title/Abstract] OR hepatic[Title/Abstract])
+        AND {date_filter}
+
+screening:
+  batch_size: 20
+  default_model: "deepseek-chat"
+  default_base_url: "https://api.deepseek.com"
+  system_prompt: |-
+    You are screening PubMed records for a Chinese narrative literature review.
+    Topic: applications of artificial intelligence in liver diseases.
+    Return strict JSON only.
+
+    Scoring rubric:
+    Score 2 = Include. Meets any:
+    - AI/ML/deep learning/NLP/LLM/radiomics/digital pathology/omics AI directly applied to liver disease, hepatology, MASLD/MASH, fibrosis, cirrhosis, viral hepatitis, HCC/liver cancer, liver transplantation, clinical workflow, prognosis, diagnosis, treatment decision, screening, monitoring, or patient management.
+    - Recent review, guideline, practice guidance, scoping review, or perspective with clear relevance to AI in hepatology or liver disease.
+
+    Score 1 = Borderline. Meets any:
+    - Gastroenterology or abdominal AI paper with partial liver relevance.
+    - Single narrow technical paper whose relevance to the review background is uncertain.
+    - Liver disease paper with digital health or decision support, but weak or unclear AI component.
+
+    Score 0 = Exclude. Meets any:
+    - Not liver/hepatology.
+    - Not AI/ML/NLP/LLM/radiomics/digital pathology/decision support.
+    - Basic science, animal-only, or molecular mechanism paper without clinical AI application.
+    - Editorial/news/comment with little evidence value.
+
+    For each record, return:
+    {"PMID":"...", "Score":0|1|2, "Reason":"<=15 English words"}
+  conservative_include:
+    high_value_terms:
+      - "review"
+      - "guideline"
+      - "practice guidance"
+      - "scoping"
+      - "consensus"
+      - "hepatology"
+      - "liver transplantation"
+      - "hepatocellular carcinoma"
+      - "masld"
+      - "mash"
+    ai_terms:
+      - "artificial intelligence"
+      - "machine learning"
+      - "deep learning"
+      - "radiomics"
+      - "large language model"
+    domain_terms:
+      - "liver"
+      - "hepatic"
+      - "hepatology"
+      - "hepatocellular"
+      - "cirrhosis"
+      - "fibrosis"
+      - "masld"
+      - "mash"
+
+core_selection:
+  category_quotas:
+    general_review_guideline: 10
+    masld_mash: 10
+    fibrosis_cirrhosis: 10
+    viral_hepatitis: 6
+    hcc_liver_cancer: 14
+    liver_transplant: 6
+    llm_nlp_workflow: 6
+  categories:
+    - name: "llm_nlp_workflow"
+      terms:
+        - "large language model"
+        - "chatgpt"
+        - "natural language processing"
+        - "retrieval augmented"
+        - "clinical workflow"
+        - "electronic health record"
+        - "ehr"
+    - name: "liver_transplant"
+      terms:
+        - "transplant"
+        - "graft"
+        - "donor-recipient"
+        - "donor recipient"
+    - name: "hcc_liver_cancer"
+      terms:
+        - "hepatocellular carcinoma"
+        - " hcc"
+        - "liver cancer"
+        - "liver neoplasm"
+        - "hepatic tumor"
+        - "hepatic tumour"
+    - name: "masld_mash"
+      terms:
+        - "masld"
+        - "mash"
+        - "nafld"
+        - "nash"
+        - "steatotic"
+        - "fatty liver"
+    - name: "fibrosis_cirrhosis"
+      terms:
+        - "fibrosis"
+        - "cirrhosis"
+        - "liver stiffness"
+        - "portal hypertension"
+        - "decompensation"
+        - "meld"
+    - name: "viral_hepatitis"
+      terms:
+        - "hepatitis b"
+        - "hepatitis c"
+        - "hbv"
+        - "hcv"
+        - "viral hepatitis"
+  default_category: "general_review_guideline"
+  high_value_journals:
+    - "journal of hepatology"
+    - "hepatology"
+    - "gastroenterology"
+    - "gut"
+    - "lancet"
+    - "nature"
+    - "npj"
+    - "eclinicalmedicine"
+    - "clinical gastroenterology and hepatology"
+    - "gut and liver"
+  priority:
+    year_weights:
+      "2026": 7
+      "2025": 6
+      "2024": 5
+      "2023": 3
+      "2019-2022": 1
+    review_terms:
+      - "review"
+      - "guideline"
+      - "practice guidance"
+      - "consensus"
+      - "scoping review"
+      - "position paper"
+    validation_terms:
+      - "external validation"
+      - "multicenter"
+      - "multi-center"
+      - "prospective"
+      - "clinical trial"
+    explainability_terms:
+      - "explainable"
+      - "shap"
+      - "interpretability"
+      - "interpretable"
+    multimodal_terms:
+      - "multimodal"
+      - "multi-modal"
+      - "omics"
+      - "radiomics"
+      - "pathology"
+      - "digital pathology"
+      - "whole slide"
+    ai_terms:
+      - "artificial intelligence"
+      - "machine learning"
+      - "deep learning"
+      - "large language model"
+      - "radiomics"
+      - "natural language processing"
+
+extraction:
+  default_model: "deepseek-chat"
+  default_base_url: "https://api.deepseek.com"
+  source_text_chars: 7000
+  system_prompt: |-
+    You extract structured notes for a narrative literature review.
+    Use only the supplied title, metadata, category, reason, and local source text.
+    Do not invent quantitative values, dataset names, sample sizes, validation types, or architecture names.
+    If a field is absent from the supplied text, write "not reported".
+    Return strict JSON only with the requested keys.
+  required_schema:
+    short_title: "string"
+    paper_type: "Original research / Review / Guideline / Perspective / Other"
+    modalities_covered: "string"
+    cancer_or_liver_types: "string"
+    in_scope_score: "integer 1-3"
+    framework_architecture: "string"
+    key_techniques: "string"
+    datasets_used: "string"
+    validation_approach: "string"
+    architecture_name: "string"
+    validation_type: "internal / external / prospective / review / not reported"
+    datasets_detail: "string"
+    key_metrics: "string"
+    key_findings:
+      - "2-4 bullet strings"
+    limitations: "string"
+    review_sections: "string"
+    key_claim_to_cite: "string"
+    conflicting_findings: "string"
