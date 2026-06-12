@@ -1,6 +1,10 @@
 project:
-  title: "AI在肝病中的应用：国内外现状及趋势"
-  description: "Chinese narrative background review for a hospital collaboration project."
+  title: "REPLACE_WITH_REVIEW_TITLE"
+  description: "REPLACE_WITH_ONE_SENTENCE_REVIEW_PURPOSE"
+  type: "narrative literature review"
+  target_journal: "REPLACE_WITH_TARGET_JOURNAL_OR_UNDECIDED"
+  target_word_count: "8000-12000"
+  intended_audience: "REPLACE_WITH_PRIMARY_AUDIENCE"
 
 paths:
   search_results: "search/pubmed_results.csv"
@@ -15,174 +19,123 @@ paths:
   nbib: "search/included_papers.nbib"
 
 pubmed:
-  retmax_per_query: 180
+  retmax_per_query: 200
   date_filter: '("2019/01/01"[Date - Publication] : "2026/12/31"[Date - Publication])'
   variables:
-    ai_terms: >-
-      ("artificial intelligence"[Title/Abstract] OR "machine learning"[Title/Abstract]
-      OR "deep learning"[Title/Abstract] OR "large language model"[Title/Abstract]
-      OR "large language models"[Title/Abstract] OR "natural language processing"[Title/Abstract]
-      OR radiomics[Title/Abstract] OR "neural network"[Title/Abstract])
+    domain_terms: >-
+      REPLACE_WITH_PUBMED_DOMAIN_TERMS
+    method_terms: >-
+      REPLACE_WITH_PUBMED_METHOD_OR_CONCEPT_TERMS
   queries:
-    - name: "general_hepatology_ai"
+    - name: "broad_topic"
       query: >-
-        {ai_terms} AND (hepatology[Title/Abstract] OR "liver disease"[Title/Abstract]
-        OR "liver diseases"[Title/Abstract]) AND {date_filter}
-    - name: "masld_mash_ai"
+        ({domain_terms}) AND ({method_terms}) AND {date_filter}
+    - name: "review_guideline_background"
       query: >-
-        {ai_terms} AND (MASLD[Title/Abstract] OR MASH[Title/Abstract] OR NAFLD[Title/Abstract]
-        OR "metabolic dysfunction-associated steatotic liver disease"[Title/Abstract]
-        OR "nonalcoholic fatty liver disease"[Title/Abstract]) AND {date_filter}
-    - name: "fibrosis_cirrhosis_ai"
-      query: >-
-        {ai_terms} AND ("liver fibrosis"[Title/Abstract] OR "hepatic fibrosis"[Title/Abstract]
-        OR cirrhosis[Title/Abstract] OR "liver stiffness"[Title/Abstract]) AND {date_filter}
-    - name: "viral_hepatitis_ai"
-      query: >-
-        {ai_terms} AND ("hepatitis B"[Title/Abstract] OR HBV[Title/Abstract]
-        OR "hepatitis C"[Title/Abstract] OR HCV[Title/Abstract]
-        OR "viral hepatitis"[Title/Abstract]) AND {date_filter}
-    - name: "hcc_liver_cancer_ai"
-      query: >-
-        {ai_terms} AND ("hepatocellular carcinoma"[Title/Abstract] OR HCC[Title/Abstract]
-        OR "liver cancer"[Title/Abstract] OR "liver neoplasm"[Title/Abstract])
+        ({domain_terms}) AND (review[Publication Type] OR guideline[Publication Type]
+        OR review[Title/Abstract] OR guideline[Title/Abstract] OR consensus[Title/Abstract])
         AND {date_filter}
-    - name: "liver_transplant_ai"
+    - name: "translation_validation"
       query: >-
-        {ai_terms} AND ("liver transplantation"[Title/Abstract]
-        OR "liver transplant"[Title/Abstract] OR "graft survival"[Title/Abstract]
-        OR "graft injury"[Title/Abstract]) AND {date_filter}
-    - name: "clinical_workflow_llm"
-      query: >-
-        ("large language model"[Title/Abstract] OR "large language models"[Title/Abstract]
-        OR "natural language processing"[Title/Abstract] OR ChatGPT[Title/Abstract]
-        OR "retrieval augmented generation"[Title/Abstract])
-        AND (hepatology[Title/Abstract] OR liver[Title/Abstract] OR hepatic[Title/Abstract])
-        AND {date_filter}
+        ({domain_terms}) AND ({method_terms}) AND (validation[Title/Abstract]
+        OR prospective[Title/Abstract] OR multicenter[Title/Abstract]
+        OR "real-world"[Title/Abstract] OR clinical[Title/Abstract]) AND {date_filter}
 
 screening:
   batch_size: 20
   default_model: "deepseek-chat"
   default_base_url: "https://api.deepseek.com"
   system_prompt: |-
-    You are screening PubMed records for a Chinese narrative literature review.
-    Topic: applications of artificial intelligence in liver diseases.
+    You are screening PubMed records for a narrative literature review.
+    Topic: REPLACE_WITH_REVIEW_TOPIC_AND_BOUNDARIES.
     Return strict JSON only.
 
-    Scoring rubric:
     Score 2 = Include. Meets any:
-    - AI/ML/deep learning/NLP/LLM/radiomics/digital pathology/omics AI directly applied to liver disease, hepatology, MASLD/MASH, fibrosis, cirrhosis, viral hepatitis, HCC/liver cancer, liver transplantation, clinical workflow, prognosis, diagnosis, treatment decision, screening, monitoring, or patient management.
-    - Recent review, guideline, practice guidance, scoping review, or perspective with clear relevance to AI in hepatology or liver disease.
+    - Directly addresses the configured topic and can support a major argument in the review.
+    - Provides original evidence, a high-value review/guideline, or a useful conceptual framework.
+    - Reports concrete outcomes, methods, datasets, cohorts, mechanisms, or translational barriers relevant to the topic.
 
     Score 1 = Borderline. Meets any:
-    - Gastroenterology or abdominal AI paper with partial liver relevance.
-    - Single narrow technical paper whose relevance to the review background is uncertain.
-    - Liver disease paper with digital health or decision support, but weak or unclear AI component.
+    - Partially relevant to the topic or method but needs human judgment.
+    - Useful background, adjacent field, landmark method, guideline, perspective, or review.
+    - Relevant domain but weak method match, or relevant method but uncertain domain match.
 
     Score 0 = Exclude. Meets any:
-    - Not liver/hepatology.
-    - Not AI/ML/NLP/LLM/radiomics/digital pathology/decision support.
-    - Basic science, animal-only, or molecular mechanism paper without clinical AI application.
+    - Outside the configured topic boundaries.
+    - Does not provide evidence, methods, concepts, or clinical context useful for the review.
     - Editorial/news/comment with little evidence value.
 
     For each record, return:
     {"PMID":"...", "Score":0|1|2, "Reason":"<=15 English words"}
-  conservative_include:
-    high_value_terms:
-      - "review"
-      - "guideline"
-      - "practice guidance"
-      - "scoping"
-      - "consensus"
-      - "hepatology"
-      - "liver transplantation"
-      - "hepatocellular carcinoma"
-      - "masld"
-      - "mash"
-    ai_terms:
-      - "artificial intelligence"
-      - "machine learning"
-      - "deep learning"
-      - "radiomics"
-      - "large language model"
-    domain_terms:
-      - "liver"
-      - "hepatic"
-      - "hepatology"
-      - "hepatocellular"
-      - "cirrhosis"
-      - "fibrosis"
-      - "masld"
-      - "mash"
 
 core_selection:
   category_quotas:
-    general_review_guideline: 10
-    masld_mash: 10
-    fibrosis_cirrhosis: 10
-    viral_hepatitis: 6
-    hcc_liver_cancer: 14
-    liver_transplant: 6
-    llm_nlp_workflow: 6
+    background_reviews_guidelines: 10
+    mechanisms_or_methods: 12
+    clinical_applications: 14
+    validation_translation: 10
+    implementation_ethics_policy: 6
   categories:
-    - name: "llm_nlp_workflow"
+    - name: "validation_translation"
       terms:
-        - "large language model"
-        - "chatgpt"
+        - "external validation"
+        - "multicenter"
+        - "multi-center"
+        - "prospective"
+        - "clinical trial"
+        - "real-world"
+        - "implementation"
+    - name: "clinical_applications"
+      terms:
+        - "diagnosis"
+        - "prognosis"
+        - "prediction"
+        - "treatment"
+        - "therapy"
+        - "screening"
+        - "monitoring"
+        - "clinical decision"
+    - name: "mechanisms_or_methods"
+      terms:
+        - "machine learning"
+        - "deep learning"
+        - "model"
+        - "framework"
+        - "algorithm"
+        - "omics"
+        - "imaging"
+        - "pathology"
         - "natural language processing"
-        - "retrieval augmented"
-        - "clinical workflow"
-        - "electronic health record"
-        - "ehr"
-    - name: "liver_transplant"
+        - "large language model"
+    - name: "implementation_ethics_policy"
       terms:
-        - "transplant"
-        - "graft"
-        - "donor-recipient"
-        - "donor recipient"
-    - name: "hcc_liver_cancer"
+        - "ethics"
+        - "bias"
+        - "fairness"
+        - "explainable"
+        - "interpretability"
+        - "workflow"
+        - "policy"
+        - "regulation"
+    - name: "background_reviews_guidelines"
       terms:
-        - "hepatocellular carcinoma"
-        - " hcc"
-        - "liver cancer"
-        - "liver neoplasm"
-        - "hepatic tumor"
-        - "hepatic tumour"
-    - name: "masld_mash"
-      terms:
-        - "masld"
-        - "mash"
-        - "nafld"
-        - "nash"
-        - "steatotic"
-        - "fatty liver"
-    - name: "fibrosis_cirrhosis"
-      terms:
-        - "fibrosis"
-        - "cirrhosis"
-        - "liver stiffness"
-        - "portal hypertension"
-        - "decompensation"
-        - "meld"
-    - name: "viral_hepatitis"
-      terms:
-        - "hepatitis b"
-        - "hepatitis c"
-        - "hbv"
-        - "hcv"
-        - "viral hepatitis"
-  default_category: "general_review_guideline"
+        - "review"
+        - "guideline"
+        - "consensus"
+        - "practice guidance"
+        - "perspective"
+        - "position paper"
+  default_category: "background_reviews_guidelines"
   high_value_journals:
-    - "journal of hepatology"
-    - "hepatology"
-    - "gastroenterology"
-    - "gut"
-    - "lancet"
     - "nature"
+    - "science"
+    - "cell"
+    - "lancet"
+    - "jama"
+    - "nejm"
+    - "bmj"
     - "npj"
     - "eclinicalmedicine"
-    - "clinical gastroenterology and hepatology"
-    - "gut and liver"
   priority:
     year_weights:
       "2026": 7
@@ -205,23 +158,20 @@ core_selection:
       - "clinical trial"
     explainability_terms:
       - "explainable"
-      - "shap"
       - "interpretability"
-      - "interpretable"
+      - "transparent"
     multimodal_terms:
       - "multimodal"
       - "multi-modal"
       - "omics"
-      - "radiomics"
+      - "imaging"
       - "pathology"
-      - "digital pathology"
-      - "whole slide"
-    ai_terms:
+      - "clinical data"
+    method_terms:
       - "artificial intelligence"
       - "machine learning"
       - "deep learning"
       - "large language model"
-      - "radiomics"
       - "natural language processing"
 
 extraction:
@@ -238,7 +188,7 @@ extraction:
     short_title: "string"
     paper_type: "Original research / Review / Guideline / Perspective / Other"
     modalities_covered: "string"
-    cancer_or_liver_types: "string"
+    domain_context: "string"
     in_scope_score: "integer 1-3"
     framework_architecture: "string"
     key_techniques: "string"

@@ -34,7 +34,7 @@ REQUIRED_SCHEMA: dict[str, Any] = {
     "short_title": "string",
     "paper_type": "Original research / Review / Guideline / Perspective / Other",
     "modalities_covered": "string",
-    "cancer_or_liver_types": "string",
+    "domain_context": "string",
     "in_scope_score": "integer 1-3",
     "framework_architecture": "string",
     "key_techniques": "string",
@@ -189,7 +189,7 @@ def render_markdown(row: pd.Series, data: dict[str, Any]) -> str:
 - **Paper type:** {clean(data.get("paper_type"))}
 - **Text source:** {text_source}
 - **Modalities covered:** {clean(data.get("modalities_covered"))}
-- **Cancer type(s):** {clean(data.get("cancer_or_liver_types"))}
+- **Domain / condition:** {clean(data.get("domain_context"))}
 - **In-scope score:** {clean(data.get("in_scope_score"))}
 
 ## Methods

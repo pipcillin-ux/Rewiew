@@ -13,7 +13,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from review_config import PROJECT_ROOT, add_config_arg, display_path, get_nested, load_config, lower_terms, resolve_path
+from review_config import PROJECT_ROOT, add_config_arg, display_path, get_nested, load_config, resolve_path
 
 INPUT_PATH = PROJECT_ROOT / "search" / "pubmed_results.csv"
 AI_SCREENED_PATH = PROJECT_ROOT / "screening" / "ai_screened.csv"
@@ -37,47 +37,27 @@ BORDERLINE_COLUMNS = [
 ]
 
 
-SYSTEM_PROMPT = """You are screening PubMed records for a Chinese narrative literature review.
-Topic: applications of artificial intelligence in liver diseases.
+SYSTEM_PROMPT = """You are screening PubMed records for a narrative literature review.
+Topic: configure this prompt in config/review_topic.yml before running.
 Return strict JSON only.
 
 Scoring rubric:
 Score 2 = Include. Meets any:
-- AI/ML/deep learning/NLP/LLM/radiomics/digital pathology/omics AI directly applied to liver disease, hepatology, MASLD/MASH, fibrosis, cirrhosis, viral hepatitis, HCC/liver cancer, liver transplantation, clinical workflow, prognosis, diagnosis, treatment decision, screening, monitoring, or patient management.
-- Recent review, guideline, practice guidance, scoping review, or perspective with clear relevance to AI in hepatology or liver disease.
+- Directly addresses the configured review topic and can support a major argument.
+- Provides original evidence, a high-value review/guideline, or a useful conceptual framework.
 
 Score 1 = Borderline. Meets any:
-- Gastroenterology or abdominal AI paper with partial liver relevance.
-- Single narrow technical paper whose relevance to the review background is uncertain.
-- Liver disease paper with digital health or decision support, but weak or unclear AI component.
+- Partially relevant to the topic or method but needs human judgment.
+- Potentially useful background, landmark method, guideline, or perspective.
 
 Score 0 = Exclude. Meets any:
-- Not liver/hepatology.
-- Not AI/ML/NLP/LLM/radiomics/digital pathology/decision support.
-- Basic science, animal-only, or molecular mechanism paper without clinical AI application.
+- Outside the configured topic.
+- Does not provide evidence, methods, concepts, or clinical context useful for the review.
 - Editorial/news/comment with little evidence value.
 
 For each record, return:
 {"PMID":"...", "Score":0|1|2, "Reason":"<=15 English words"}
 """
-
-CONSERVATIVE_INCLUDE = {
-    "high_value_terms": [
-        "review",
-        "guideline",
-        "practice guidance",
-        "scoping",
-        "consensus",
-        "hepatology",
-        "liver transplantation",
-        "hepatocellular carcinoma",
-        "masld",
-        "mash",
-    ],
-    "ai_terms": ["artificial intelligence", "machine learning", "deep learning", "radiomics", "large language model"],
-    "domain_terms": ["liver", "hepatic", "hepatology", "hepatocellular", "cirrhosis", "fibrosis", "masld", "mash"],
-}
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Screen PubMed records with an LLM using review-topic config.")
@@ -187,18 +167,18 @@ def screen_batch(client: OpenAI, rows: list[dict[str, Any]]) -> list[dict[str, A
     return output
 
 
-def conservative_borderline_include(row: pd.Series) -> int:
-    text = f"{row.get('Title', '')} {row.get('Journal', '')} {row.get('Abstract', '')}".lower()
-    high_value = any(term in text for term in lower_terms(CONSERVATIVE_INCLUDE.get("high_value_terms", [])))
-    ai_liver = any(term in text for term in lower_terms(CONSERVATIVE_INCLUDE.get("ai_terms", []))) and any(
-        term in text for term in lower_terms(CONSERVATIVE_INCLUDE.get("domain_terms", []))
-    )
-    return 1 if high_value and ai_liver else 0
-
-
 def build_review_files() -> None:
     screened = pd.read_csv(AI_SCREENED_PATH, dtype={"PMID": str})
     source = pd.read_csv(INPUT_PATH, dtype={"PMID": str})
+    previous_decisions: dict[str, str] = {}
+    if BORDERLINE_PATH.exists():
+        previous = pd.read_csv(BORDERLINE_PATH, dtype={"PMID": str}).fillna("")
+        if "Include" in previous.columns:
+            previous_decisions = {
+                str(row["PMID"]): str(row.get("Include", "")).strip()
+                for _, row in previous.iterrows()
+                if str(row.get("PMID", "")).strip()
+            }
     merged = screened.merge(
         source[["PMID", "Abstract"]],
         on="PMID",
@@ -207,7 +187,7 @@ def build_review_files() -> None:
 
     borderline = merged[merged["Score"] == 1].copy()
     if not borderline.empty:
-        borderline["Include"] = borderline.apply(conservative_borderline_include, axis=1)
+        borderline["Include"] = borderline["PMID"].map(previous_decisions).fillna("")
     else:
         borderline["Include"] = []
     write_rows(BORDERLINE_PATH, borderline.to_dict("records"), BORDERLINE_COLUMNS, append=False)
@@ -215,14 +195,16 @@ def build_review_files() -> None:
     final = screened.copy()
     include_map = dict(zip(borderline["PMID"], borderline["Include"]))
     final["Score"] = final.apply(
-        lambda row: 2 if row["Score"] == 1 and include_map.get(row["PMID"], 0) == 1 else (0 if row["Score"] == 1 else row["Score"]),
+        lambda row: 2
+        if row["Score"] == 1 and str(include_map.get(row["PMID"], "")).strip() == "1"
+        else (0 if row["Score"] == 1 and str(include_map.get(row["PMID"], "")).strip() == "0" else row["Score"]),
         axis=1,
     )
     write_rows(FINAL_PATH, final.to_dict("records"), OUTPUT_COLUMNS, append=False)
 
 
 def main() -> None:
-    global AI_SCREENED_PATH, BASE_URL, BATCH_SIZE, BORDERLINE_PATH, CONSERVATIVE_INCLUDE, FINAL_PATH, INPUT_PATH, MODEL, SYSTEM_PROMPT
+    global AI_SCREENED_PATH, BASE_URL, BATCH_SIZE, BORDERLINE_PATH, FINAL_PATH, INPUT_PATH, MODEL, SYSTEM_PROMPT
     args = parse_args()
     config = load_config(args.config)
     INPUT_PATH = PROJECT_ROOT / args.input if args.input else resolve_path(config, "paths.search_results", "search/pubmed_results.csv")
@@ -233,7 +215,6 @@ def main() -> None:
     MODEL = str(get_nested(config, "screening.default_model", MODEL))
     BASE_URL = str(get_nested(config, "screening.default_base_url", BASE_URL))
     SYSTEM_PROMPT = str(get_nested(config, "screening.system_prompt", SYSTEM_PROMPT))
-    CONSERVATIVE_INCLUDE = dict(get_nested(config, "screening.conservative_include", CONSERVATIVE_INCLUDE) or CONSERVATIVE_INCLUDE)
 
     load_dotenv(PROJECT_ROOT / ".env")
     BATCH_SIZE = int(os.getenv("SCREEN_BATCH_SIZE", str(BATCH_SIZE)))

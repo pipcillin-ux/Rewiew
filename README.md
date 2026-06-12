@@ -1,811 +1,405 @@
 # NLR-workflow
 
-**Narrative Literature Review workflow — AI-Assisted Workflow with Claude Code**
+**Narrative Literature Review workflow — 通用、人机协作的叙述性综述工作流**
+
+这个仓库是一套用于生物医学及相关科研主题的叙述性文献综述
+（Narrative Literature Review, NLR）工作流模板。它把两类流程合在一起：
+
+- 可执行的工程流水线：PubMed 检索、AI 初筛、核心文献选择、资料提取、Zotero/Pandoc 导出。
+- 人类写作流程：选题判断、论点框架、章节级补充检索、逐句事实核查、最终引用校验。
+
+本模板默认不绑定任何具体主题。开始前必须先填写
+`config/review_topic.yml`；只要配置里仍有 `REPLACE_WITH_...` 占位符，脚本会
+直接报错，避免误用旧主题。
 
 ---
 
-很多AI科研项目趋向于去做一个“全能战士”，但是实际上，我们在科研过程中需要解决的是 **十分具体的问题**。据此，我产生了一个想法，每次只用AI做好一件具体的事。首次给大家带来的便是此项目—**Narrative Literature Review workflow (NLR-workflow)**，专为解决叙述性文献综述而生。
+## 工作流总览
 
-这个仓库包含一套完整的、由 AI 辅助的**叙述性文献综述（Narrative Literature Review, NLR）**工作流，适用于生物医学领域的综述型文章写作。工作流以 Claude Code 为核心，结合 Python 自动化脚本、Zotero 文献管理和 Pandoc 排版，覆盖从文献检索到 Word 稿件导出的全部流程。
-
-> 本仓库以癌症多模态 AI 综述项目为模板：
-> **Multimodal Digital Twins for Cancer: Integrating Pathology, Radiology, and Multi-Omics AI**
-> 内容可按需替换为任意生物医学选题。
-
-> **使用定位**：本仓库提供项目结构、Claude Code skills 和生成脚本的提示词。除非 `scripts/`
-> 目录已包含具体实现，否则自动化脚本需要按下文提示词由 Claude Code 生成后再运行。
-> `pdfs/` 目录用于本地 PDF 文件，默认被 git 忽略，可由 Zotero PDF 复制脚本自动创建。
-
----
-
-## 目录
-
-- [工作流概览](#工作流概览)
-- [目录结构](#目录结构)
-- [环境配置](#环境配置)
-- [Claude Code 自定义技能](#claude-code-自定义技能)
-- [阶段一：文献检索](#阶段一文献检索)
-- [阶段二：文献筛选](#阶段二文献筛选)
-- [阶段三：资料提取](#阶段三资料提取)
-- [阶段四：综合与大纲](#阶段四综合与大纲)
-- [阶段五：写作](#阶段五写作)
-- [阶段六：润色（五个串行 Pass）](#阶段六润色五个串行-pass)
-- [阶段七：参考文献与 Word 导出](#阶段七参考文献与-word-导出)
-- [写作规范要点](#写作规范要点)
-- [工具技能速查](#工具技能速查)
+| Phase | 目标 | 输入 | 动作 | 输出 | 人工检查点 |
+|---|---|---|---|---|---|
+| 0 | 选题与框架 | 研究方向、目标期刊、特刊要求 | 明确读者、问题意识、综述边界和潜在论点 | 完成的 `config/review_topic.yml` | 人决定主题，不让 AI 直接替代立意 |
+| 1 | 宽检索建材料池 | PubMed 检索式 | `scripts/pubmed_search.py` | `search/pubmed_results.csv` | 检索量是否足以支撑框架，是否过宽/过窄 |
+| 2 | 初筛与核心集 | 检索结果 | `scripts/batch_screen.py`、人工复查、`scripts/select_core_papers.py` | `screening/final_screened.csv`、`core_screened.csv` | `Score=1` 必须人工决定 |
+| 3 | 资料获取与提取 | 核心文献、摘要/PDF | `scripts/download_sources.py`、`scripts/extract_notes.py` | `extractions/*.md` | 数字、队列、数据集、结论是否可追溯 |
+| 4 | 综合与大纲 | 提取笔记 | 聚类、gap 分析、生成大纲 | `synthesis/*.md`、`outline/outline_current.md` | 大纲是否由论点驱动，而不是论文罗列 |
+| 5 | 分章节写作 | 大纲、提取笔记 | `/lit-draft` 或逐节写作提示 | `draft/*.md`、`manuscript_v1.md` | 每段是否有明确主张和代表性证据 |
+| 6 | 事实审查与润色 | 初稿、提取笔记、原文 | `/lit-audit`、逐句核查、去 AI 痕迹、门控检查 | `manuscript_v2-v5.md`、审查报告 | 含引用的句子必须被来源支持 |
+| 7 | 引文与 Word 导出 | 最终稿、Zotero、Better BibTeX | `/lit-cite`、Pandoc + `zotero.lua` | `manuscript.docx` | Word 中 Zotero 引文与参考文献一致 |
 
 ---
 
-## 工作流概览
+## 环境准备
 
-```
-Phase 1  文献检索    PubMed API → pubmed_results.csv
-Phase 2  文献筛选    AI 批量打分 → 人工复查 → final_screened.csv
-Phase 3  资料提取    PDF/摘要 → AI 结构化提取 → extractions/*.md
-Phase 4  综合分析    聚类 → 差距分析 → 大纲草稿
-Phase 5  写作        /lit-draft 逐节起草 → manuscript_v1.md
-Phase 6  润色        6a 事实审查 → 6b 去AI痕迹 → 6c 句式多样 →
-                     6d 框架密度 → 6e 连贯性 → 6e-gate 投稿门控
-Phase 7  参考文献    /lit-cite → pandoc + zotero.lua → manuscript.docx
-```
-
-**叙述性综述 vs 系统性综述**：本工作流专为叙述性综述设计。叙述性综述以论点驱动文献，而非枚举文献；行文中应避免使用精确文献计数（如"本综述收录了89篇研究"）或系统综述惯用语，这是工作流中多个 pass 重点检查的内容。
-
----
-
-## 目录结构
-
-```
-literature-review/
-├── CLAUDE.md               ← Claude Code 项目配置（每次会话自动读取）
-├── README.md               ← 本文件
-├── pyproject.toml          ← uv 依赖管理
-├── uv.lock                 ← 锁定版本（提交到 git）
-├── LOG.md                  ← 会话日志
-├── search/                 ← PubMed 原始检索结果（CSV）
-├── screening/              ← 筛选表格（ai_screened / borderline / final）
-├── pdfs/                   ← 全文 PDF + pdf_map.csv（DOI → 文件名映射）
-├── extractions/            ← 每篇文献一个 .md 提取笔记
-├── synthesis/              ← 聚类、差距分析、审查报告
-├── outline/                ← 大纲草稿（v1, v2, …）
-├── draft/                  ← 各节草稿（每节一个文件）
-├── manuscript/             ← 完整稿件（v1 → v2 + 最终 .docx）
-├── references/             ← .bib 文件（Better BibTeX 导出）
-└── scripts/                ← Python 自动化脚本
-```
-
-**规则**：所有文件必须写在上述结构内，不得在结构外新建文件（除非与用户确认）。
-
----
-
-## 环境配置
-
-### 1. 安装 uv（Python 包管理器）
-
-```bash
-# macOS / Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-### 2. 同步项目依赖
+### 1. 安装依赖
 
 ```bash
 uv sync
 ```
 
-> **注意**：始终使用 `uv run python scripts/xxx.py` 运行脚本，`uv add <包名>` 添加新依赖，**不要**直接使用 `pip install`。
+始终使用 `uv run python scripts/xxx.py` 运行脚本，使用 `uv add <package>` 添加依赖，
+不要直接 `pip install`。
 
-### 3. 安装系统工具
+### 2. 配置环境变量
 
-Phase 7 需要系统级 Pandoc CLI。`uv sync` 只安装 Python 依赖，不会安装 `pandoc`
-命令本身。
-
-```bash
-# macOS
-brew install pandoc
-
-# Ubuntu / Debian
-sudo apt-get install pandoc
-```
-
-安装后可用 `pandoc --version` 检查。
-
-### 4. 配置环境变量
-
-在项目根目录创建 `.env` 文件（已加入 `.gitignore`，不会提交到仓库）：
-
-> 需先在Deepseek官网申请Deepseek API key
+复制 `.env.example` 为 `.env`，填写真实值：
 
 ```dotenv
-# AI 批量提取（DeepSeek API，OpenAI 兼容格式）
+ENTREZ_EMAIL=your_email@example.com
+NCBI_API_KEY=your_ncbi_api_key
 DEEPSEEK_API_KEY=your_deepseek_key
-SCREEN_MODEL=deepseek-v4-flash          # 默认值，可按需修改
-EXTRACT_MODEL=deepseek-v4-flash         # 默认值，可按需修改
-ZOTERO_COLLECTION=DigitalTwins-Cancer-Review
+SCREEN_MODEL=deepseek-chat
+EXTRACT_MODEL=deepseek-chat
+ZOTERO_COLLECTION=Your-Review-Collection
 ```
 
-### 5. 安装 Claude Code
+`.env` 已被 `.gitignore` 忽略，不要提交。
 
-> 详见 [Claude Code 官方文档](https://docs.anthropic.com/claude-code)。
+### 3. 系统工具
 
+Phase 7 需要 Pandoc：
 
-### 6. Zotero 集成
+```bash
+brew install pandoc
+```
 
-本工作流使用 **NBIB 批量导入**（使用 Zotero 本地API），可获取完整元数据（卷号、页码、MeSH 词）。
-
-> Zotero 本地API开启方式：Zotero Edit→settings→Advanced→勾选 Allow other applications on this computer to communicate with Zotero Available at http://localhost:23119/api/
-
-**导入流程：**
-
-1. 运行 `uv run python scripts/export_nbib.py` 生成 `search/included_papers.nbib`
-2. 在 Zotero 中：文件 → 导入 → 选择上述 `.nbib` 文件
-3. 导入完成后，将自动生成的集合重命名为 `DigitalTwins-Cancer-Review`（或你的项目名）
-
-**Better BibTeX 插件**（引文导出必需）：
-
-- 安装后，Zotero 会为每条文献分配稳定的 citekey（格式如 `Chen2023`）
-- 通过"文件 → 导出文献库"，选择 Better BibTeX 格式，导出到 `references/library.bib`
-
-**Word 引文嵌入（Phase 7）**：
-
-- 下载 [zotero.lua](https://retorque.re/zotero-better-bibtex/exporting/zotero.lua) 并放置于 `manuscript/` 目录
-- 运行 pandoc 时使用 `--lua-filter=zotero.lua`，会自动调用 Zotero JSON-RPC API 嵌入活引用字段
-- **不要**使用 `--citeproc` 或 `--bibliography`（会生成静态文本，无法通过 Word Zotero 插件编辑）
+Zotero 需要安装 Better BibTeX 插件，用于生成稳定 citekey 和导出
+`references/library.bib`。
 
 ---
 
-## Claude Code 自定义技能
+## Phase 0：选题与配置
 
-本工作流包含以下 Claude Code 自定义技能（位于 `.claude/skills/` 目录），在 Claude Code 会话中直接使用斜杠命令调用：
+在跑脚本之前，先把综述问题说清楚。建议人工完成这些判断：
 
-| 技能命令 | 功能 |
-|---|---|
-| `/lit-status` | 会话启动状态面板：读取 LOG.md、统计各目录文件数、推断当前阶段、建议下一步 |
-| `/lit-audit` | 事实准确性审查：核查稿件中每一个数字（AUC、样本量、数据集名称）是否与提取笔记一致 |
-| `/lit-deregister` | 去 AI 写作痕迹：检测并修改对立构式、评价性形容词、重复句式开头，以及系统综述惯用语 |
-| `/lit-draft [节号]` | 按大纲逐节起草：读取大纲字数预算、从提取笔记核实数据、执行引文密度和行文规范检查 |
-| `/lit-gate` | 投稿门控检查：测量字数、破折号频率、引文密度、摘要完整性、占位符残留等指标，返回 PASS/WARN/FAIL |
-| `/lit-cite` | 引文占位符替换：解析 `library.bib`，将 `[Chen2023]` 格式替换为 pandoc `[@citekey]` 格式 |
+- 目标读者是谁：临床医生、方法学研究者、转化医学团队，还是政策/管理读者。
+- 综述要解决什么张力：证据碎片化、技术落地困难、机制不清、临床验证不足等。
+- 哪些文献必须纳入：指南、里程碑方法、代表性临床研究、关键负面结果。
+- 哪些文献排除：纯背景、纯机制、纯技术、动物实验、会议摘要等，按主题决定。
+- 目标期刊/特刊是否有字数、图表、结构或语言要求。
 
----
+然后填写 `config/review_topic.yml`。至少替换：
 
-## 阶段一：文献检索
+- `project.*`
+- `pubmed.variables.domain_terms`
+- `pubmed.variables.method_terms`
+- `screening.system_prompt`
+- `core_selection.category_quotas`
+- `core_selection.categories`
 
-### 构建 PubMed 检索脚本
-
-> 需先在NCBI官网申请 Entrez API key
-
-将以下提示词复制到 Claude Code 执行，生成 `scripts/pubmed_search.py`：
-
-```
-Read CLAUDE.md. Then write a Python script at scripts/pubmed_search.py that:
-1. Queries PubMed using the Entrez API (use Biopython's Entrez module)
-2. Runs the following search strings (one at a time, with a 1-second delay between):
-   - ("digital twin" OR "digital twins") AND (cancer OR tumor OR oncology)
-   - (computational pathology OR whole slide image) AND (radiology OR imaging) AND (multimodal OR multi-modal)
-   - (multi-omics OR multiomics) AND (cancer OR tumor) AND (deep learning OR machine learning OR AI) AND (patholog OR radiol OR imaging OR mri OR ct scan OR histolog OR whole slide OR wsi)
-   - (foundation model) AND (pathology OR radiology) AND (oncology OR cancer)
-3. Deduplicates results by PMID
-4. Outputs to search/pubmed_results.csv with columns: PMID, Title, Authors, Journal, Year, Abstract, DOI
-5. Prints a summary: total hits per query, total after deduplication
-Use email = "xxx@xxx.com" for the Entrez API xxxxx（填入你的API key）.
-```
-
-> 根据你的研究主题修改检索式，其余部分不变。脚本生成后运行：`uv run python scripts/pubmed_search.py`
+如果配置未完成，任何脚本都会快速失败，并提示仍含占位符的位置。
 
 ---
 
-## 阶段二：文献筛选
+## Phase 1：文献检索
 
-### 步骤 2a — AI 批量打分
+运行：
 
-生成 `scripts/batch_screen.py`（复制到 Claude Code 执行）：
-
-```
-Read CLAUDE.md.
-Write scripts/batch_screen.py that processes search/pubmed_results.csv as follows:
-
-SETUP:
-- Drop rows where Abstract is NaN before processing
-- Process in batches of 25 rows
-- After each batch, APPEND results to screening/ai_screened.csv
-  (write CSV header only when creating the file for the first time)
-- On startup, check if screening/ai_screened.csv already exists;
-  if so, read already-processed PMIDs and skip them — this allows safe resume after interruption
-
-SCORING RUBRIC (apply to Title + Abstract only):
-
-  Score 2 — Include. Paper meets ANY of:
-    • Proposes or applies a cancer digital twin framework
-    • Integrates ≥2 modalities from {pathology/WSI, radiology/CT/MRI/PET/ultrasound,
-      omics/genomics/transcriptomics/proteomics} for a cancer task
-    • Multimodal foundation model for oncology involving pathology + imaging or + omics
-
-  Score 1 — Borderline. Paper meets ANY of:
-    • Single-modality but methodologically landmark (e.g. top-tier WSI foundation model,
-      pan-cancer imaging atlas)
-    • Radiomics + omics integration without a distinct imaging modality
-    • Digital twin for surgical/radiotherapy planning without multimodal AI component
-    • Review or perspective broadly relevant to the topic scope
-
-  Score 0 — Exclude:
-    • Pure omics study (no imaging or pathology component)
-    • Pure imaging or pathology (no omics integration, not multimodal)
-    • Clinical trial design, statistical methods, pharmacokinetics
-    • Non-cancer disease context
-    • Only tangentially mentions AI/cancer with no in-scope method
-
-OUTPUT: for each paper write one row to screening/ai_screened.csv with columns:
-  PMID, Title, Year, Journal, DOI, Score, Reason
-  Keep Reason to ≤15 words.
-
-After all batches complete, print:
-  Total processed | Score=2 (Include) | Score=1 (Borderline) | Score=0 (Exclude)
-
-Run with: uv run python scripts/batch_screen.py
+```bash
+uv run python scripts/pubmed_search.py --config config/review_topic.yml
 ```
 
-> **修改说明**：将评分标准中的研究主题替换为你的综述范围，其余框架结构不变。
+脚本会读取 `pubmed.queries`，逐条检索 PubMed，按 PMID 去重，并输出：
 
-### 步骤 2b — 生成人工复查表
-
-打分完成后，在 Claude Code 中执行：
-
-```
-Read screening/ai_screened.csv and search/pubmed_results.csv.
-Generate screening/borderline_review.csv containing ONLY Score=1 papers.
-
-Steps:
-1. Filter ai_screened.csv to rows where Score = 1.
-2. Join with pubmed_results.csv (encoding="latin-1") on PMID to bring in Abstract.
-3. Sort by Year descending, then PMID descending within the same year.
-4. Output screening/borderline_review.csv with exactly these 8 columns in order:
-     PMID, Title, Year, Journal, Abstract, DOI, Reason, Include
-   - Include column: leave blank (empty string) for every row.
-   - Use encoding utf-8-sig so Excel opens it correctly.
-5. Print: "Written: screening/borderline_review.csv — N rows"
+```text
+search/pubmed_results.csv
 ```
 
-### 步骤 2c — 人工判断（手动操作）
+建议第一轮检索稍宽，目标是建立 200-400 篇左右的材料池，方便 AI 辅助判断
+领域结构和潜在写作角度。若结果太少，放宽领域词；若结果太杂，增加主题边界或
+方法词。
 
-用 Excel 打开 `screening/borderline_review.csv`，在 `Include` 列填写：
-- `1` = 纳入（升为 Score=2）
-- `0` = 排除（降为 Score=0）
-- 留空 = 维持边界（会触发警告）
+---
 
-保存后对 Claude Code 说：**"I've filled in borderline_review.csv, please sync decisions back to ai_screened.csv"**
+## Phase 2：AI 初筛、人工复查、核心文献选择
 
-### 步骤 2d — 同步决策到 CSV
+### 2.1 AI 初筛
 
-```
-Read screening/borderline_review.csv and screening/ai_screened.csv.
-Parse the Include column: for each PMID, read the value.
-Update the Score column in ai_screened.csv:
-  - If Include = 1: set Score = 2
-  - If Include = 0: set Score = 0
-  - If blank / missing: leave Score = 1 and print a warning with the PMID
-Save the updated data to screening/final_screened.csv (do not overwrite ai_screened.csv).
-Columns of final_screened.csv: PMID, Title, Year, Journal, DOI, Score, Reason.
-Print: final Include count (Score=2) / Exclude count (Score=0) / still-borderline (Score=1).
+```bash
+uv run python scripts/batch_screen.py --config config/review_topic.yml
 ```
 
-### 步骤 2e — 导出 NBIB 以供 Zotero 导入
+输出：
 
+- `screening/ai_screened.csv`
+- `screening/borderline_review.csv`
+- `screening/final_screened.csv`
+
+评分规则：
+
+- `2`：纳入。
+- `1`：边界，需要人工判断。
+- `0`：排除。
+
+### 2.2 人工复查边界文献
+
+打开 `screening/borderline_review.csv`，在 `Include` 列填写：
+
+- `1`：纳入。
+- `0`：排除。
+- 空白：仍不确定，保留为边界。
+
+保存后重新运行：
+
+```bash
+uv run python scripts/batch_screen.py --config config/review_topic.yml
 ```
-Read screening/final_screened.csv.
-Write scripts/export_nbib.py that:
-1. Reads all PMIDs where Score = 2 from final_screened.csv
-2. Uses Biopython Entrez.efetch (db="pubmed", rettype="medline", retmode="text")
-   to fetch complete PubMed records in batches of 100
-3. Writes all records to search/included_papers.nbib
-4. Prints: PMIDs requested / records fetched / output path
 
-Why NBIB (not Zotero API):
-  - PubMed returns complete metadata: volume, issue, pages, MeSH, language, etc.
-  - Zotero API-created items lack these fields and require a second metadata fetch.
-  - One-click bulk import; Zotero auto-deduplicates on DOI.
+脚本会保留已完成的 AI 初筛结果，读取你在 `Include` 列中的人工决定，并同步到
+`screening/final_screened.csv`。
 
-Run with: uv run python scripts/export_nbib.py
+### 2.3 选择核心文献集
 
-Manual step after running:
-  Zotero → File → Import → select search/included_papers.nbib
-  (Zotero auto-creates a collection named "included_papers" — rename it to your project name after import)
+```bash
+uv run python scripts/select_core_papers.py --config config/review_topic.yml
 ```
 
-### 步骤 2f — 生成 pdf_map.csv 并从 Zotero 复制 PDF
+输出：
 
-此步骤在 2e 完成（Zotero 导入后）、Phase 3 提取开始**之前**运行。它生成 `pdfs/pdf_map.csv`（`batch_extract.py` 用于定位 PDF 的映射表），并将 PDF 从 Zotero 本地存储复制到 `pdfs/` 目录。
-
-> **前提**：PDF 必须已在 Zotero 中附加完毕（手动下载，或通过 Zotero 右键 → Find Available PDF 批量获取）。仅支持 `imported_file` 类型附件（存储在 Zotero storage 目录内）；`linked_file` 类型不受支持。
-
+```text
+screening/core_screened.csv
 ```
-Read CLAUDE.md.
-Write scripts/copy_pdfs_from_zotero.py that builds pdfs/pdf_map.csv and copies
-PDF attachments from Zotero local storage. Zotero must be running.
 
-STEP 1 — Discover Zotero user ID and collection key:
-- Call http://localhost:23119/api/ (GET, no auth needed for local API)
-  Parse the first userId from the response JSON.
-- GET http://localhost:23119/api/users/{userId}/collections?format=json&limit=100
-  Find the collection whose data.name == "DigitalTwins-Cancer-Review"
-  (make the collection name configurable via a ZOTERO_COLLECTION env var with this as default).
-  Extract its collectionKey.
+这个文件不是“全部纳入文献”，而是供提取和写作优先使用的核心证据集。它应覆盖
+背景、方法/机制、临床应用、验证转化、伦理实施等关键板块。配额和类别由
+`core_selection` 控制。
 
-STEP 2 — Retrieve all parent items in the collection:
-- GET http://localhost:23119/api/users/{userId}/collections/{collectionKey}/items
-      ?format=json&include=data&itemType=-attachment-note&limit=100&start=0
-  Handle pagination: increment start by 100 until fewer than 100 items are returned.
-  Keep only items whose data.itemType is journalArticle, preprint, report,
-  conferencePaper, or thesis.
+---
 
-STEP 3 — Per-item: extract identifiers and find PDF attachment:
-For each parent item:
-  a. PMID: search data.extra for a line matching "PMID: (\d+)" (case-insensitive);
-     also try data.get("pmid", ""). Strip whitespace. Empty string if not found.
-  b. DOI: data.get("DOI", ""). Normalize: lowercase, strip leading
-     "https://doi.org/" or "http://dx.doi.org/". Empty string if not found.
-  c. Fetch children:
-       GET http://localhost:23119/api/users/{userId}/items/{itemKey}/children?format=json
-  d. Find the first child where:
-       data.contentType == "application/pdf"
-       AND data.linkMode == "imported_file"
-     If no such child exists, record the item with empty att_key and pdf_filename.
+## Phase 3：资料获取与结构化提取
 
-STEP 4 — Copy the PDF to pdfs/:
-  - att_key = attachment item key (e.g. "WW3JGA3J")
-  - Locate Zotero storage directory (try in order):
-      Windows: %USERPROFILE%\Zotero\storage
-               %APPDATA%\Zotero\Zotero\storage
-               %LOCALAPPDATA%\Zotero\storage
-      macOS:   ~/Zotero/storage
-               ~/Library/Application Support/Zotero/storage
-    Use the first path that exists as a directory.
-    Allow override via ZOTERO_STORAGE env var.
-  - Source: {zotero_storage}/{att_key}/{attachment.data.filename}
-  - dest_filename: f"{att_key}_{attachment.data.filename}"
-    (prefix with att_key to guarantee uniqueness across papers with identical filenames)
-  - Destination: pdfs/{dest_filename}
-  - Skip copy if destination already exists (idempotent).
-  - If source file does not exist on disk, log a warning and leave pdf_filename as
-    the expected dest_filename anyway (the PDF may not have been downloaded yet).
+### 3.1 保存摘要并尝试获取开放全文
 
-STEP 5 — Write pdfs/pdf_map.csv:
-  Columns (in order): PMID, DOI, att_key, pdf_filename
-  - Include ALL parent items, even those without a PDF (empty att_key / pdf_filename).
-  - Encoding: utf-8-sig (so Excel opens correctly on Windows).
+```bash
+uv run python scripts/download_sources.py --config config/review_topic.yml
+```
 
-After writing, print:
-  Total items in collection / PDFs found in Zotero storage /
-  PDFs copied (new) / PDFs skipped (already present) /
-  Items without any PDF attachment / Items where source file missing on disk
+输出：
 
-Add retry logic (3 attempts, 0.5 s delay) for each HTTP request.
-Run with: uv run python scripts/copy_pdfs_from_zotero.py
+- `search/abstracts/*.md`
+- `pdfs/*.pdf`，如果能从开放来源获取
+- `pdfs/pdf_map.csv`
+
+当前工作流不新增 Zotero PDF 复制脚本。若某些文献没有开放全文，可通过 Zotero、
+机构权限、出版商页面或手动下载补齐 PDF，再更新 `pdfs/pdf_map.csv`。
+
+### 3.2 批量提取笔记
+
+```bash
+uv run python scripts/extract_notes.py --config config/review_topic.yml
+```
+
+输出：
+
+```text
+extractions/*.md
+```
+
+每个提取笔记记录：
+
+- 文献信息、来源类型、领域/疾病/场景。
+- 方法框架、关键技术、数据集、验证方式。
+- 样本量、指标值、数据集名称、模型名称。
+- 局限性、适合支撑的章节、可引用主张。
+
+提取笔记是后续事实核查的来源，不要把模型没有明确读到的数字补进去。
+
+---
+
+## Phase 4：综合、gap 分析与大纲
+
+这一阶段主要靠 AI 辅助整理，但结论由人确认。
+
+建议产物：
+
+- `synthesis/clusters.md`：主题聚类，按方法、应用、疾病/场景、证据层级归类。
+- `synthesis/gap_analysis.md`：研究空白、方法空白、临床转化空白、冲突证据。
+- `outline/outline_current.md`：当前写作大纲。
+
+大纲应包含：
+
+- 6-8 个主章节。
+- 每节 2-3 句话说明核心论点。
+- 每节目标字数。
+- 对应的文献/聚类来源。
+- 图表计划。
+
+叙述性综述的大纲应先有论点，再选择文献支撑；不要按论文逐篇排队。
+
+---
+
+## Phase 5：分章节写作
+
+推荐逐节写：
+
+```text
+/lit-draft 3
+/lit-draft "Section title"
+```
+
+也可以手动给 AI 提示：
+
+1. 读取 `outline/outline_current.md` 中该节的目标和字数。
+2. 只读取与该节相关的 `extractions/*.md`。
+3. 每段先提出综合性主张，再用 2-4 篇代表性文献支撑。
+4. 保留 `[FirstAuthorYear]` 占位符，不提前转换为正式引用。
+5. 不写“本综述纳入了 N 篇研究”这类系统综述语言。
+
+章节写完后组装为：
+
+```text
+manuscript/manuscript_v1.md
 ```
 
 ---
 
-## 阶段三：资料提取
+## Phase 6：事实审查与润色
 
-### 构建批量提取脚本
+这一阶段是整套流程的安全阀，顺序不要颠倒。
 
-此步骤为每篇纳入文献生成一个结构化 `.md` 提取笔记，包含架构名称、数据集、样本量、关键指标，供后续写作引用核验。
+### 6.1 事实准确性审查
 
-```
-Read CLAUDE.md.
-Write scripts/batch_extract.py that processes all Score=2 papers from screening/final_screened.csv as follows:
-
-SETUP:
-- Load final_screened.csv (Score=2), pdfs/pdf_map.csv (DOI→pdf_filename mapping),
-  and search/pubmed_results.csv (encoding latin-1, for Authors and Abstract)
-- Join all three on PMID/DOI to build a per-paper record
-- On startup, scan extractions/ for existing .md files; read the DOI line from each
-  and skip any paper whose DOI is already extracted (resume-safe)
-
-PER-PAPER LOGIC:
-- If pdf_filename is present in pdf_map.csv and the file exists in pdfs/:
-    Use pymupdf (fitz) to extract full text; detect section boundaries for
-    Introduction, Methods, Results, and Conclusion/Discussion using regex on section headers;
-    if a section is not found fall back to first/last N chars of the full text.
-    Set Text source = "Full text PDF"
-- Otherwise:
-    Use the Abstract from pubmed_results.csv.
-    Set Text source = "Abstract only"
-
-For each paper, call DeepSeek API (OpenAI-compatible, same pattern as batch_screen.py)
-with the extracted text and paper metadata.
-
-EXTRACTION INSTRUCTION (pass this to the model):
-  "For every claim, capture the exact metric value (AUC, C-index, accuracy), the
-   specific dataset name, and patient count — these will be needed for dense in-text
-   citation in the manuscript. Prefer concrete numbers over qualitative descriptions.
-   Name the specific model/framework (e.g. 'MIFAPS', 'mSTAR', 'G-HANet') rather than a
-   generic category. Record whether validation was internal, external, or prospective."
-
-Return a JSON object with fields:
-  paper_type, modalities, cancer_types, in_scope_score (1/2/3),
-  framework, architecture_name, key_techniques,
-  datasets, datasets_detail (list of {name, n_patients, institution}),
-  validation, validation_type (internal / external / prospective),
-  key_metrics (list of {metric, value, dataset, n}),
-  key_findings (list of 2–4 strings), limitations,
-  sections_fed, key_claim, conflicts
-Render the JSON into extractions/{FirstAuthorYear}.md following the
-Extraction Note Format template in CLAUDE.md, including the
-## Quantitative Evidence section:
-  ## Quantitative Evidence
-  - **Architecture name:** {architecture_name}
-  - **Validation type:** {validation_type}
-  - **Datasets (name · n patients · institution):** {datasets_detail}
-  - **Key metrics (metric · value · dataset · n):** {key_metrics}
-
-OUTPUT:
-- One .md file per paper in extractions/
-- Print progress per paper and a final summary: from PDF / from abstract / errors
-
-.env variables:
-  DEEPSEEK_API_KEY   — required
-  EXTRACT_MODEL      — model name (default: deepseek-v4-flash)
-
-Run with: uv run python scripts/batch_extract.py
+```text
+/lit-audit manuscript/manuscript_v1.md
 ```
 
-### 提取进度检查
+核查对象：
 
-随时可在 Claude Code 中运行以下提示词检查提取完成情况：
+- AUC、C-index、准确率、HR、样本量。
+- 数据集名称、队列来源、中心数。
+- 模型/框架名称。
+- 验证类型：内部、外部、前瞻性、回顾性。
 
-```
-Read CLAUDE.md. Read screening/final_screened.csv (Score = 2 rows) and list files in extractions/.
-Report papers missing an extraction, split into: has PDF in pdfs/ vs no PDF.
-Sort each list by Year descending.
-```
+所有 mismatch 或无法追溯的数字，必须在进入润色前修正。
 
----
+### 6.2 逐句来源核查
 
-## 阶段四：综合与大纲
+对每一个带引用的关键句，按这个顺序检查：
 
-### 主题聚类
+1. 先看提取笔记是否支持该句。
+2. 如果提取笔记不够，查看摘要。
+3. 如果摘要仍不够，通过 DOI 或 PDF 查看原文 Results/Methods。
+4. 如果原文不支持，删除、降级或重写该句。
 
-```
-Read CLAUDE.md. Read all files in extractions/.
-Group the papers into thematic clusters. For each cluster, suggest a descriptive label and list the papers (by FirstAuthorYear) that belong to it.
-Consider clustering by: modality combination, technical approach, cancer type, clinical application.
-Output the clustering to synthesis/clusters.md in a readable Markdown table.
-```
+这一步对应人工防幻觉流程：AI 可以帮忙比对，但最终接受或拒绝由人决定。
 
-### Gap 分析
+### 6.3 去 AI 痕迹与叙述性综述门控
 
-```
-Read CLAUDE.md. Read synthesis/clusters.md and all extractions/.
-Identify:
-1. Modality combinations that are underrepresented
-2. Cancer types rarely studied in multimodal digital twin work
-3. Technical approaches mentioned as future directions but not yet implemented
-4. Conflicting findings between papers
-Output to synthesis/gap_analysis.md with each gap labeled as: Research Gap / Methodological Gap / Clinical Translation Gap.
-```
-
-### 生成大纲草稿
-
-以下约束针对 npj Digital Medicine，可根据目标期刊调整字数限制和章节数量：
-
-```
-TARGET JOURNAL: npj Digital Medicine
-HARD CONSTRAINTS:
-- Total main text: 10,000–12,000 words (enforce strictly)
-- Major sections (## level): 6–8 maximum
-- Subsections (### level): 2–4 per major section maximum
-- Required figures: plan 3–5 figures; describe each in one sentence
-- Required tables: plan 1–2 tables; describe columns
-- Introduction: no subsections — flowing paragraphs only
-- Conclusion: no subsections — flowing paragraphs only
-
-Read CLAUDE.md, synthesis/clusters.md, and synthesis/gap_analysis.md.
-Generate a detailed section outline for the review. For each section, include:
-- Section title
-- 2–3 sentence description of what it covers
-- Which thematic clusters/papers feed into it
-- Approximate target word count
-
-After the outline, output:
-FIGURE PLAN:
-- Figure 1: [title] — [one sentence description, what it depicts]
-- Figure 2: ...
-- Figure 3: ...
-
-TABLE PLAN:
-- Table 1: [title] — columns: [list them]
-
-WORD BUDGET:
-- Section 1 (Introduction): X words
-- Section 2: X words
-[... total must sum to 10,000-12,000]
-
-Save both the outline AND the figure/table plan to outline/outline_v[x].md.
-```
-
----
-
-## 阶段五：写作
-
-### 步骤 5a：逐节起草
-
-```
-/lit-draft [节号或节名]
-```
-
-**示例**：`/lit-draft 3`、`/lit-draft 3.1`、`/lit-draft "Pathomic Fusion"`
-
-`/lit-draft` 技能会从 `outline/outline_current.md` 读取字数预算，自动发现并读取相关提取笔记，核验每一个引用数字，执行引文密度（目标每 60–80 词至少 1 条引文）、破折号限制和行文规范检查，最终保存到 `draft/[section_slug].md`。
-
-**注意事项**：
-- 每次调用只起草一节
-- 按大纲顺序依次起草
-- 技能结束时会提示下一节标识符
-
-### 步骤 5b：组装完整稿件
-
-```
-Read CLAUDE.md and outline/outline_current.md.
-Following the section order in outline_current.md, read all corresponding section
-.md files under draft/ and assemble them into a complete review at
-manuscript/manuscript_v1.md.
-
-Requirements:
-1. Order sections strictly as in the outline — do not reorder.
-2. Add YAML front matter at the top of the file (for later pandoc use):
-   ---
-   title: "Your Review Title Here"
-   ---
-3. Normalize heading levels across sections (# = article title, ## = top-level
-   section, ### = subsection); fix any level inconsistencies caused by drafting
-   sections in separate files.
-4. During assembly, perform a word count per section. If any section exceeds its outline budget
-   by more than 20%, flag it with <!-- OVER BUDGET: ~X words, target Y --> and trim the most
-   redundant paragraph to bring it within range. Removing a clearly redundant paragraph is
-   permitted; rewriting for style is not.
-5. After assembly, report the total word count. If total exceeds 12,000 words, identify the
-   3 longest sections and flag the most cuttable paragraphs in each with
-   <!-- TRIM CANDIDATE: [reason] -->.
-6. Handle inter-section seams: if adjacent passages contain duplicate transition
-   sentences or duplicate definitions, flag them with <!-- DUPLICATE: ... --> comments
-   but do NOT auto-delete — leave them for me to confirm.
-7. Keep all [FirstAuthorYear] placeholders exactly as-is.
-8. At the end, print a checklist: which sections were assembled, and which are missing
-   (present in the outline but not found under draft/).
-```
-
-### 步骤 5c：撰写摘要
-
-```
-Read manuscript/manuscript_v1.md.
-Write a 150–180 word unstructured abstract for npj Digital Medicine as a SINGLE paragraph.
-
-Content to cover (in this narrative order):
-1. The clinical problem — why single-modality data is insufficient (1-2 sentences)
-2. The integrative concept being reviewed, introduced naturally in the flow — NOT as a
-   scope statement. Do not write "This review synthesizes/examines/covers X studies".
-   Instead, name the concept and define it parenthetically in the same sentence that
-   advances the argument.
-3. The 2-3 main synthesis findings — what the evidence establishes (2-3 sentences)
-4. The key barriers to clinical translation (1 sentence)
-5. A forward-looking statement naming specific enabling technologies (1 sentence)
-
-Hard prohibitions:
-- NO "This review synthesizes / examines / covers / presents" meta-sentences
-- NO specific paper counts (not "280 studies", not "89 pathomic papers", not "N=X")
-- NO numbered subsections or bullet points
-- NO abbreviations without definition on first use
-
-Style requirements:
-- Single paragraph only
-- No citations
-- Third person, present tense for established findings, future tense for directions
-- Last sentence must name a specific technology or mechanism, not a vague "will enable"
-
-Output the abstract immediately after the YAML front matter and before "## 1. Introduction".
-Format: ## Abstract\n\n[abstract text]
-```
-
----
-
-## 阶段六：润色（五个串行 Pass）
-
-**执行顺序**：6a → 6b → 6c → 6d → 6e → 6e-gate，不可跳过或合并。每个 pass 针对不同的错误模式。
-
-```
-manuscript_v1.md  →[6a audit]→  修复  →[6b /lit-deregister]→  manuscript_v2.md
-  →[6c sentence-shape]→  manuscript_v3.md
-  →[6d framing]→  manuscript_v4.md
-  →[6e seams]→  manuscript_v5.md
-  →[6e-gate /lit-gate]→  PASS 后进入 Phase 7
-```
-
-### 步骤 6a — 事实准确性审查（最高优先级）
-
-```
-/lit-audit
-```
-
-该skill自动发现稿件和 `extractions/`，核查每一个引用数字是否与提取笔记一致，报告保存到 `synthesis/audit_YYYYMMDD.md`。
-
-**所有 MISMATCH 和 NOT_IN_EXTRACTION 问题必须在进入 6b 前修复。含未核实数字的稿件不得进入下一阶段。**
-
-### 步骤 6b — 去 AI 写作痕迹
-
-```
+```text
 /lit-deregister
-```
-
-技能统计对立构式（"not X but Y"）、评价性形容词（striking、remarkable、unprecedented 等）、重复句式开头，以及系统综述惯用语（精确文献计数如"89 studies in this corpus"、穷举声明如"none of the 280 reviewed studies"），展示计数表后等待确认，修订后保存为 `manuscript_v2.md`。
-
-### 步骤 6c — 句式多样性 pass
-
-```
-Read manuscript/manuscript_v2.md.
-
-For each paragraph, inspect the opening word and syntactic structure of each sentence.
-Flag any paragraph where 2 or more consecutive sentences share the same opening structure
-(e.g., all begin with "The", all begin with a subject-verb, all are long compound sentences).
-
-Rewrite flagged paragraphs for variety. The target rhythm, drawn from published npj Digital
-Medicine reviews, is: an opening claim sentence (~15–20 words) that states what the paragraph
-argues; two to four evidence sentences each naming a specific study with its key finding or
-metric (~15–25 words each); then a closing sentence that either interprets the pattern for
-the review's argument (~25–35 words) or acknowledges a translational gap or limitation
-(e.g., "However, most evidence derives from retrospective cohorts, and prospective validation
-remains absent from the published literature" — this closing caveat is a characteristic
-pattern in both benchmark papers). Body paragraphs in the benchmarks typically run 5–8
-sentences. The paragraph must NOT open with a study name — that is annotated-bibliography
-structure, not narrative synthesis.
-Do not change meaning or citations.
-
-Do not restructure paragraphs that already have variety. Only fix the flagged ones.
-Save the revised text as manuscript/manuscript_v3.md.
-```
-
-### 步骤 6d — 引言与结论密度 pass
-
-```
-Read manuscript/manuscript_v3.md. Work on the Introduction and Conclusion ONLY.
-
-INTRODUCTION:
-- By the end of the second paragraph, at least one named framework, dataset, or study
-  (with a patient count or metric) must appear. Move concrete evidence forward.
-- Cut abstract scene-setting sentences that do not name anything specific.
-- Maximum 2 sentences per paragraph that contain no citation.
-
-CONCLUSION:
-- The benchmark conclusion style allows general synthesis sentences without citation —
-  whole paragraphs can be conceptual and field-level. The test is not "does this sentence
-  cite a study?" but "could this sentence be anchored to a specific named study or
-  technology from the review body, and is it being left vague out of laziness?" For each
-  uncited general claim, check whether a specific exemplar exists in the reviewed literature;
-  if one does, name it. If the claim is genuinely field-level synthesis with no single
-  study to cite, it may stand. Limit uncited general claims to no more than 2–3 per
-  conclusion paragraph.
-- Keep the final forward-looking sentence; make it name the specific mechanism or
-  technology that will unlock the next step, not a vague call to action.
-Save the revised text as manuscript/manuscript_v4.md.
-```
-
-### 步骤 6e — 连贯性与一致性 pass
-
-```
-Read CLAUDE.md and manuscript/manuscript_v4.md.
-
-1. Seams: check that transitions between sections read naturally; remove duplicate
-   concept definitions and duplicate transition sentences (resolve <!-- DUPLICATE -->
-   comments left by the assembly step).
-2. Global consistency: terminology, abbreviations (defined on first use, used
-   consistently thereafter), tense, and person throughout.
-3. Narrative arc: ensure the whole text reads as a narrative synthesis, not a
-   patchwork of paragraphs.
-4. Concision: tighten overlong sentences by cutting redundant clauses. Do NOT delete
-   whole paragraphs — tighten within sentences to preserve flow.
-5. Citation coverage: flag any factual claim without a [FirstAuthorYear] placeholder.
-6. Style: no bullets in main text; no "Recently, …" or "In recent years, …" openers.
-
-7. NLR language: scan for any remaining systematic-review language — paper counts
-   about the review's own collection ("89 studies in this corpus", "only 12 of the
-   280 reviewed papers"), exhaustive-corpus assertions ("none of the 280 reviewed
-   studies", "absent from all papers in the corpus"), meta-sentences about the
-   review's scope ("this review synthesizes 280 studies"), and "in this corpus" /
-   "the corpus" used as SLR boundary terms. Do NOT rewrite them here — this pass is
-   a consistency check, not a rewrite pass. Insert a <!-- NLR-WARN: [brief reason] -->
-   comment at each instance and list all flagged lines in the output summary. If any
-   flags are present, the user must run /lit-deregister before proceeding to Phase 7.
-   Numbers from *cited studies* (patient counts, AUC values) are not SLR language —
-   do not flag them.
-
-Do not summarize what changed. Output the complete revised text to manuscript/manuscript_v5.md.
-```
-
-### 步骤 6e-gate — 投稿门控检查
-
-```
 /lit-gate manuscript/manuscript_v5.md
 ```
 
-技能检查字数、破折号频率、引文密度、摘要完整性、未填充占位符等指标，返回 PASS / WARN / FAIL 及具体修正建议。建议显式传入 `manuscript/manuscript_v5.md`，避免误检查旧稿。**没有 CRITICAL 级别问题时方可进入 Phase 7。**
+重点检查：
+
+- 对立构式和空泛评价词是否过多。
+- 是否像系统综述一样报告文献库数量。
+- 引言和结论是否过空。
+- 段落是否像 annotated bibliography。
+- 字数、摘要、占位符、引文密度是否达标。
 
 ---
 
-## 阶段七：参考文献与 Word 导出
+## Phase 7：Zotero、引文和 Word 导出
 
-> **前提条件**：
->
-> - Zotero 已打开，Better BibTeX 插件已安装
-> - `references/library.bib` 已从 Better BibTeX 导出（含 citekey）
-> - `manuscript/zotero.lua` 文件已就位
-> - `/lit-gate` 返回无 CRITICAL 问题
+### 7.1 导出 NBIB 并导入 Zotero
 
-### 步骤 7a — 替换引文占位符
-
+```bash
+uv run python scripts/export_nbib.py --config config/review_topic.yml
 ```
+
+输出：
+
+```text
+search/included_papers.nbib
+```
+
+在 Zotero 中导入该文件。导入后将集合重命名为 `.env` 中的
+`ZOTERO_COLLECTION`。
+
+### 7.2 导出 Better BibTeX
+
+在 Zotero 中导出 Better BibTeX 到：
+
+```text
+references/library.bib
+```
+
+### 7.3 转换占位符
+
+```text
 /lit-cite manuscript/manuscript_v5.md
 ```
 
-技能解析 `references/library.bib`，将所有 `[FirstAuthorYear]` 占位符匹配到 citekey，自动替换无歧义项，歧义项批量呈现供用户确认。建议显式传入 `manuscript/manuscript_v5.md`，输出保存为 `manuscript_cited.md` 和 `cite_report_YYYYMMDD.md`。
+输出：
 
-### 步骤 7b — pandoc + zotero.lua 生成 Word 文档
+```text
+manuscript/manuscript_cited.md
+```
 
-在 `manuscript/` 目录下运行（**Zotero 必须保持打开状态**）：
+### 7.4 生成 Word
+
+在 `manuscript/` 目录运行：
 
 ```bash
 pandoc -s --lua-filter=zotero.lua manuscript_cited.md -o manuscript.docx
 ```
 
-> `zotero.lua` 过滤器会联系 Zotero 的 Better BibTeX JSON-RPC API，将 live citation 字段直接嵌入 docx 文件。
+然后在 Word 中使用 Zotero 插件设置引用格式并插入参考文献列表。
 
-### 步骤 7c — 在 Word 中设置引文格式（手动操作）
-
-1. 在 Word 中打开 `manuscript.docx`（需安装 Zotero Word 插件）
-2. Zotero 工具栏 → 文档偏好设置 → 选择目标引文格式（如 Vancouver）→ 确定
-3. 点击"添加/编辑参考文献列表"→ Zotero 自动插入格式化参考文献
+不要使用 `pandoc --citeproc` 或 `--bibliography` 生成最终稿，因为它们会生成
+静态引用，Word Zotero 插件无法继续编辑。
 
 ---
 
-## 写作规范要点
+## 常用命令
 
-本工作流的行文规范由 CLAUDE.md 和各技能共同执行，核心要点：
+```bash
+uv run python scripts/pubmed_search.py --config config/review_topic.yml
+uv run python scripts/batch_screen.py --config config/review_topic.yml
+uv run python scripts/select_core_papers.py --config config/review_topic.yml
+uv run python scripts/download_sources.py --config config/review_topic.yml
+uv run python scripts/extract_notes.py --config config/review_topic.yml
+uv run python scripts/export_nbib.py --config config/review_topic.yml
+```
 
-**叙述性综述语言规范（NLR）：**
-- 以论点驱动文献，不以文献驱动论点——段落以论断句开头，文献作为证据，结尾为解释或差距
-- 禁止精确计数本综述文献库（"89 studies in this corpus"）
-- 禁止穷举声明（"none of the 280 reviewed studies"）
-- 禁止关于综述本身的元句子（"This review synthesizes 280 studies"）
-- 用定性表述代替计数（"the dominant evidence base"、"relatively few published studies"）
+状态检查和写作技能：
 
-**数字准确性：**
-- 所有具体数字（AUC、C-index、样本量、数据集名称）必须可追溯至提取笔记
-- 不得从记忆或模型推断生成数字
-
-**格式规范：**
-- 正文无项目符号列表
-- 破折号（em-dash）全文不超过 8–10 个
-- 缩写首次出现必须定义
-- 不以研究名称开头段落（"Smith et al. found X. Jones et al. found Y."是注释书目结构，不是叙述综合）
+```text
+/lit-status
+/lit-draft [section]
+/lit-audit
+/lit-deregister
+/lit-gate
+/lit-cite
+```
 
 ---
 
-## 工具技能速查
+## 写作原则
 
-| 使用场景 | 命令 |
-|---|---|
-| 每次会话开始时查看项目状态 | `/lit-status` |
-| 稿件数字准确性审查 | `/lit-audit` |
-| 去除 AI 写作痕迹 | `/lit-deregister` |
-| 逐节起草 | `/lit-draft [节号]` |
-| 投稿前门控检查 | `/lit-gate` |
-| 替换引文占位符 | `/lit-cite` |
-| 记录本次会话 | 对 Claude Code 说："Append an entry to LOG.md for today's session. Include: phase, what was completed, what's next." |
+- 综述要围绕问题和论点组织，而不是围绕论文清单组织。
+- 每段最好有一个明确主张、若干代表性证据和一句解释/限制。
+- 具体数字必须来自具体文献，不得由 AI 推断。
+- 不在正文中精确统计本综述自己的文献数量。
+- 不写 “This review synthesizes N studies” 这类系统综述式句子。
+- 可以使用“the reviewed literature”“published work”“relatively few studies”等叙述性表达。
+
+---
+
+## 项目日志
+
+每次重要会话结束，在 `LOG.md` 追加：
+
+```markdown
+## YYYY-MM-DD
+- Phase: X
+- Done: [what was completed]
+- Next: [what to do next session]
+```
 
 ---
 
 ## 许可证
 
-MIT License — 欢迎在遵守许可证条款的前提下自由使用和改造本工作流。
+MIT License。

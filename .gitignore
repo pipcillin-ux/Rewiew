@@ -1,0 +1,12 @@
+.env
+pdfs/*
+!pdfs/.gitkeep
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+.claude/settings.local.json
+
+# Local/private notes not intended for the public workflow template
+/AI-Powered Scientific Review Workflow for Liver Disease Research.docx
+/课题框架.md

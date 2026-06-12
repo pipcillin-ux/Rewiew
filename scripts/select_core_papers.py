@@ -14,44 +14,40 @@ SOURCE_PATH = PROJECT_ROOT / "search" / "pubmed_results.csv"
 OUTPUT_PATH = PROJECT_ROOT / "screening" / "core_screened.csv"
 
 CATEGORY_QUOTAS = {
-    "general_review_guideline": 10,
-    "masld_mash": 10,
-    "fibrosis_cirrhosis": 10,
-    "viral_hepatitis": 6,
-    "hcc_liver_cancer": 14,
-    "liver_transplant": 6,
-    "llm_nlp_workflow": 6,
+    "background_reviews_guidelines": 10,
+    "mechanisms_or_methods": 12,
+    "clinical_applications": 14,
+    "validation_translation": 10,
+    "implementation_ethics_policy": 6,
 }
 
 HIGH_VALUE_JOURNALS = [
-    "journal of hepatology",
-    "hepatology",
-    "gastroenterology",
-    "gut",
-    "lancet",
     "nature",
+    "science",
+    "cell",
+    "lancet",
+    "jama",
+    "nejm",
+    "bmj",
     "npj",
     "eclinicalmedicine",
-    "clinical gastroenterology and hepatology",
-    "gut and liver",
 ]
 
 CATEGORIES = [
-    {"name": "llm_nlp_workflow", "terms": ["large language model", "chatgpt", "natural language processing", "retrieval augmented", "clinical workflow", "electronic health record", "ehr"]},
-    {"name": "liver_transplant", "terms": ["transplant", "graft", "donor-recipient", "donor recipient"]},
-    {"name": "hcc_liver_cancer", "terms": ["hepatocellular carcinoma", " hcc", "liver cancer", "liver neoplasm", "hepatic tumor", "hepatic tumour"]},
-    {"name": "masld_mash", "terms": ["masld", "mash", "nafld", "nash", "steatotic", "fatty liver"]},
-    {"name": "fibrosis_cirrhosis", "terms": ["fibrosis", "cirrhosis", "liver stiffness", "portal hypertension", "decompensation", "meld"]},
-    {"name": "viral_hepatitis", "terms": ["hepatitis b", "hepatitis c", "hbv", "hcv", "viral hepatitis"]},
+    {"name": "validation_translation", "terms": ["external validation", "multicenter", "multi-center", "prospective", "clinical trial", "real-world", "implementation"]},
+    {"name": "clinical_applications", "terms": ["diagnosis", "prognosis", "prediction", "treatment", "therapy", "screening", "monitoring", "clinical decision"]},
+    {"name": "mechanisms_or_methods", "terms": ["machine learning", "deep learning", "model", "framework", "algorithm", "omics", "imaging", "pathology", "natural language processing", "large language model"]},
+    {"name": "implementation_ethics_policy", "terms": ["ethics", "bias", "fairness", "explainable", "interpretability", "workflow", "policy", "regulation"]},
+    {"name": "background_reviews_guidelines", "terms": ["review", "guideline", "consensus", "practice guidance", "perspective", "position paper"]},
 ]
-DEFAULT_CATEGORY = "general_review_guideline"
+DEFAULT_CATEGORY = "background_reviews_guidelines"
 PRIORITY_CONFIG: dict[str, Any] = {
     "year_weights": {"2026": 7, "2025": 6, "2024": 5, "2023": 3, "2019-2022": 1},
     "review_terms": ["review", "guideline", "practice guidance", "consensus", "scoping review", "position paper"],
     "validation_terms": ["external validation", "multicenter", "multi-center", "prospective", "clinical trial"],
-    "explainability_terms": ["explainable", "shap", "interpretability", "interpretable"],
-    "multimodal_terms": ["multimodal", "multi-modal", "omics", "radiomics", "pathology", "digital pathology", "whole slide"],
-    "ai_terms": ["artificial intelligence", "machine learning", "deep learning", "large language model", "radiomics", "natural language processing"],
+    "explainability_terms": ["explainable", "interpretability", "transparent"],
+    "multimodal_terms": ["multimodal", "multi-modal", "omics", "imaging", "pathology", "clinical data"],
+    "method_terms": ["artificial intelligence", "machine learning", "deep learning", "large language model", "natural language processing"],
 }
 
 
@@ -114,7 +110,8 @@ def priority(row: pd.Series) -> int:
         score += 2
     if contains_any(text, lower_terms(PRIORITY_CONFIG.get("multimodal_terms", []))):
         score += 3
-    if contains_any(text, lower_terms(PRIORITY_CONFIG.get("ai_terms", []))):
+    method_terms = list(PRIORITY_CONFIG.get("method_terms", []))
+    if contains_any(text, lower_terms(method_terms)):
         score += 4
 
     title_words = len(re.findall(r"[A-Za-z0-9]+", title))

@@ -39,3 +39,8 @@
 - Phase: Project reset
 - Done: Cleared search results, screening tables, extraction notes, PDFs, draft files, synthesis/outline/reference process files, and Python script cache.
 - Next: Reinitialize the review topic and rerun the workflow from search.
+
+## 2026-06-12
+- Phase: Workflow integration and template generalization
+- Done: Initialized a lightweight Git baseline, merged the executable workflow with the human-in-the-loop writing and verification process, generalized the default config and agent instructions, removed old topic-specific defaults from scripts, and added placeholder validation.
+- Next: Fill `config/review_topic.yml` for the next concrete review topic, then rerun the workflow from Phase 1.
